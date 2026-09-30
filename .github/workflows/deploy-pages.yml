@@ -1,4 +1,4 @@
-name: Deploy PassGuard to GitHub Pages
+name: Deploy GuardPass to GitHub Pages
 
 on:
   push:
