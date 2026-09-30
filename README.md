@@ -34,7 +34,7 @@ Build with `npm run build`.
 
 ## Supabase setup (optional)
 
-The local preview works without an account or backend. It includes a passwordless email-login demo, local user/login records, progress and an admin-console preview. These browser-only records are for testing the UX and must be replaced with Supabase Auth and database writes before production use.
+The local preview works without an account or backend. It includes a passwordless email-login demo, local user/login records, progress and a password-protected admin-console preview. Set `VITE_ADMIN_EMAIL` and `VITE_ADMIN_PASSWORD` in an uncommitted `.env.local` file before using the admin preview. These browser-only records are for testing the UX and must be replaced with Supabase Auth and database writes before production use.
 
 To add synced accounts and a shared learning database:
 
