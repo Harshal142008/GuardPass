@@ -110,6 +110,7 @@ create policy "users manage own attempts" on public.quiz_attempts for all using 
 create policy "users manage own achievements" on public.user_achievements for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "users manage own bookmarks" on public.bookmarks for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "users manage own settings" on public.user_settings for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "users record own login events" on public.login_events for insert with check (auth.uid() = user_id);
 create policy "admins view login events" on public.login_events for select using (public.is_admin());
 create policy "admins manage course content" on public.courses for all using (public.is_admin()) with check (public.is_admin());
 create policy "admins manage modules" on public.modules for all using (public.is_admin()) with check (public.is_admin());
