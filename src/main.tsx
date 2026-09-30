@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AlertTriangle, Award, BookOpen, Check, CheckCircle2, ClipboardCheck, Copy, Eye, EyeOff, ExternalLink, Info, LayoutDashboard, Lightbulb, LockKeyhole, LogIn, Menu, RefreshCw, Shield, ShieldCheck, Sparkles, Target, UserRound, X } from 'lucide-react';
 import './style.css';
+import { hasSupabase, supabase } from './lib/supabase';
 
 const common = ['123456', 'password', '123456789', '12345', 'qwerty', '12345678', '111111', '123123', 'abc123', 'admin', 'welcome', 'letmein', 'monkey', 'dragon', 'football', 'iloveyou', 'master', 'login', 'princess', 'sunshine', 'password1', 'admin123', 'welcome123', 'qwerty123', 'password123'];
 const words = ['password', 'admin', 'welcome', 'login', 'letmein', 'qwerty', 'dragon', 'football', 'princess', 'sunshine', 'master', 'monkey', 'hello', 'computer', 'summer', 'winter', 'secret'];
@@ -227,13 +228,26 @@ const checklistGroups = [
 
 function readProgress(): Record<string, boolean> { try { return JSON.parse(localStorage.getItem('guardpass-progress') || '{}'); } catch { return {}; } }
 function writeProgress(progress: Record<string, boolean>) { localStorage.setItem('guardpass-progress', JSON.stringify(progress)); }
+async function recordRemoteLogin(userId: string, email: string) {
+  if (!supabase) return;
+  await supabase.from('login_events').insert({ user_id: userId, email, success: true, user_agent: navigator.userAgent.slice(0, 500) });
+}
+async function loadRemoteProgress(userId: string) {
+  if (!supabase) return {};
+  const { data } = await supabase.from('lesson_progress').select('lesson_id').eq('user_id', userId);
+  return Object.fromEntries((data || []).map((row) => [row.lesson_id, true]));
+}
+async function saveRemoteProgress(userId: string, lessonId: string) {
+  if (!supabase) return;
+  await supabase.from('lesson_progress').upsert({ user_id: userId, lesson_id: lessonId }, { onConflict: 'user_id,lesson_id' });
+}
 
-function LearningHub({ progress, setProgress }: { progress: Record<string, boolean>; setProgress: React.Dispatch<React.SetStateAction<Record<string, boolean>>> }) {
+function LearningHub({ progress, setProgress, userId }: { progress: Record<string, boolean>; setProgress: React.Dispatch<React.SetStateAction<Record<string, boolean>>>; userId: string | null }) {
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
   const [quizAnswer, setQuizAnswer] = useState<number | null>(null);
   const completedLessons = Object.values(progress).filter(Boolean).length;
-  const markComplete = (lesson: Lesson) => { const next = { ...progress, [lesson.id]: true }; setProgress(next); writeProgress(next); };
+  const markComplete = (lesson: Lesson) => { const next = { ...progress, [lesson.id]: true }; setProgress(next); writeProgress(next); if (userId) void saveRemoteProgress(userId, lesson.id); };
   return <main><div className="hero learningHero"><div className="eyebrow"><BookOpen size={16} /> SECURITY LEARNING PLATFORM</div><h1>Build safer digital habits, one lesson at a time.</h1><p>Short, practical lessons about passwords, privacy, phishing and responsible data management.</p><div className="learningSummary"><strong>{completedLessons} / {courses.reduce((sum, course) => sum + course.lessons.length, 0)} lessons complete</strong><div className="bar"><i style={{ width: `${completedLessons / 18 * 100}%` }} /></div><span>Free to explore • Educational and defensive use only</span></div></div>{selectedCourse ? <section className="panel courseDetail"><button className="textButton" onClick={() => { setSelectedCourse(null); setSelectedLesson(null); setQuizAnswer(null); }}>← All courses</button><div className="courseHeading"><span className="courseIcon">{selectedCourse.icon}</span><div><span className="eyebrow">{selectedCourse.category}</span><h2>{selectedCourse.title}</h2><p>{selectedCourse.description}</p></div></div><div className="lessonList">{selectedCourse.lessons.map((lesson, index) => <button className={`lessonItem ${progress[lesson.id] ? 'complete' : ''} ${selectedLesson?.id === lesson.id ? 'selected' : ''}`} onClick={() => setSelectedLesson(lesson)} key={lesson.id}><span className="lessonNumber">{progress[lesson.id] ? <Check size={16} /> : index + 1}</span><span><b>{lesson.title}</b><small>{lesson.minutes} min read</small></span><ExternalLink size={16} /></button>)}</div>{selectedLesson && <article className="lessonContent"><div className="eyebrow">LESSON {selectedCourse.lessons.findIndex((lesson) => lesson.id === selectedLesson.id) + 1}</div><h3>{selectedLesson.title}</h3><p>{selectedLesson.body}</p><div className="tipBox"><Lightbulb size={18} /><span><b>Practical tip</b>{selectedLesson.tip}</span></div><button className="primary" onClick={() => markComplete(selectedLesson)}>{progress[selectedLesson.id] ? <><Check size={17} /> Completed</> : <>Mark lesson complete <Check size={17} /></>}</button></article>}<div className="quizCard"><div className="sectionTitle"><Award size={18} /> Quick knowledge check</div><h3>{selectedCourse.quiz.question}</h3><div className="quizOptions">{selectedCourse.quiz.options.map((option, index) => <button className={quizAnswer === index ? (index === selectedCourse.quiz.answer ? 'correct' : 'incorrect') : ''} onClick={() => setQuizAnswer(index)} key={option}>{String.fromCharCode(65 + index)}. {option}</button>)}</div>{quizAnswer !== null && <p className={quizAnswer === selectedCourse.quiz.answer ? 'quizFeedback good' : 'quizFeedback bad'}>{quizAnswer === selectedCourse.quiz.answer ? 'Correct! ' : 'Not quite. '}{selectedCourse.quiz.explanation}</p>}</div></section> : <div className="courseGrid">{courses.map((course) => { const done = course.lessons.filter((lesson) => progress[lesson.id]).length; return <button className="courseCard panel" onClick={() => setSelectedCourse(course)} key={course.id}><span className="courseIcon">{course.icon}</span><span className="courseCategory">{course.category}</span><h2>{course.title}</h2><p>{course.description}</p><div className="courseMeta"><span>{done}/{course.lessons.length} lessons</span><span>{course.lessons.reduce((sum, lesson) => sum + lesson.minutes, 0)} min</span></div><div className="miniBar"><i style={{ width: `${done / course.lessons.length * 100}%` }} /></div><span className="courseLink">Start learning <ExternalLink size={15} /></span></button>})}</div>}</main>;
 }
 
@@ -252,42 +266,149 @@ function SecurityCenter() {
 }
 
 type DemoUser = { email: string; firstLogin: string; lastLogin: string; logins: number };
+type AdminEvent = { email: string; at: string; success: boolean };
+function summarizeUsers(events: AdminEvent[]): DemoUser[] {
+  const byEmail = new Map<string, DemoUser>();
+  for (const event of events) {
+    const current = byEmail.get(event.email);
+    if (!current) byEmail.set(event.email, { email: event.email, firstLogin: event.at, lastLogin: event.at, logins: event.success ? 1 : 0 });
+    else byEmail.set(event.email, { ...current, firstLogin: event.at < current.firstLogin ? event.at : current.firstLogin, lastLogin: event.at > current.lastLogin ? event.at : current.lastLogin, logins: current.logins + (event.success ? 1 : 0) });
+  }
+  return [...byEmail.values()].sort((a, b) => b.lastLogin.localeCompare(a.lastLogin));
+}
 const ADMIN_EMAIL = (import.meta.env.VITE_ADMIN_EMAIL || 'admin123@gmail.com').trim().toLowerCase();
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || '';
 function readDemoUsers(): DemoUser[] { try { return JSON.parse(localStorage.getItem('guardpass-users') || '[]'); } catch { return []; } }
+type LocalCredential = { email: string; salt: string; hash: string; createdAt: string };
+const LOCAL_CREDENTIALS_KEY = 'guardpass-local-credentials';
+const bytesToHex = (bytes: Uint8Array) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+const hexToBytes = (value: string) => new Uint8Array(value.match(/.{1,2}/g)?.map((pair) => parseInt(pair, 16)) || []);
+async function hashLocalPassword(passwordValue: string, salt: Uint8Array) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(passwordValue), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: salt as BufferSource, iterations: 120000, hash: 'SHA-256' }, key, 256);
+  return bytesToHex(new Uint8Array(bits));
+}
+function readLocalCredentials(): LocalCredential[] { try { return JSON.parse(localStorage.getItem(LOCAL_CREDENTIALS_KEY) || '[]'); } catch { return []; } }
+async function saveLocalCredential(emailValue: string, passwordValue: string) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const credential = { email: emailValue, salt: bytesToHex(salt), hash: await hashLocalPassword(passwordValue, salt), createdAt: new Date().toISOString() };
+  localStorage.setItem(LOCAL_CREDENTIALS_KEY, JSON.stringify([...readLocalCredentials().filter((item) => item.email !== emailValue), credential]));
+}
+async function verifyLocalCredential(emailValue: string, passwordValue: string) {
+  const credential = readLocalCredentials().find((item) => item.email === emailValue);
+  return Boolean(credential && (await hashLocalPassword(passwordValue, hexToBytes(credential.salt))) === credential.hash);
+}
 function AccountPanel({ onAdmin }: { onAdmin: () => void }) {
   const [email, setEmail] = useState('');
-  const [sessionEmail, setSessionEmail] = useState(() => localStorage.getItem('guardpass-session') || '');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [sessionEmail, setSessionEmail] = useState('');
   const [status, setStatus] = useState('');
-  const login = () => {
-    const normalized = email.trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) { setStatus('Enter a valid email address.'); return; }
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!supabase) { setSessionEmail(localStorage.getItem('guardpass-session') || ''); return; }
+    let mounted = true;
+    void supabase.auth.getSession().then(({ data }) => { if (mounted) setSessionEmail(data.session?.user.email || ''); });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => { if (mounted) setSessionEmail(session?.user.email || ''); });
+    return () => { mounted = false; listener.subscription.unsubscribe(); };
+  }, []);
+
+  const localLogin = (normalized: string) => {
     const now = new Date().toISOString(); const users = readDemoUsers(); const current = users.find((user) => user.email === normalized);
     const nextUsers = current ? users.map((user) => user.email === normalized ? { ...user, lastLogin: now, logins: user.logins + 1 } : user) : [...users, { email: normalized, firstLogin: now, lastLogin: now, logins: 1 }];
-    localStorage.setItem('guardpass-users', JSON.stringify(nextUsers)); localStorage.setItem('guardpass-login-events', JSON.stringify([{ email: normalized, at: now, success: true }, ...JSON.parse(localStorage.getItem('guardpass-login-events') || '[]')].slice(0, 100))); localStorage.setItem('guardpass-session', normalized); setSessionEmail(normalized); setStatus('Signed in for this local preview.');
+    const events = (() => { try { return JSON.parse(localStorage.getItem('guardpass-login-events') || '[]'); } catch { return []; } })();
+    localStorage.setItem('guardpass-users', JSON.stringify(nextUsers)); localStorage.setItem('guardpass-login-events', JSON.stringify([{ email: normalized, at: now, success: true }, ...events].slice(0, 100))); localStorage.setItem('guardpass-session', normalized); setSessionEmail(normalized);
   };
-  return <main><div className="hero"><div className="eyebrow"><UserRound size={16} /> ACCOUNT & SYNC</div><h1>Your learning data, under your control.</h1><p>Use passwordless email login in this preview. Production account security is handled by Supabase Auth; GuardPass never stores your account password or analyzed passwords.</p></div><section className="panel accountPanel"><div className="sectionTitle"><LogIn size={18} /> Email login</div>{sessionEmail ? <div className="signedIn"><CheckCircle2 size={19} /><span>Signed in as <b>{sessionEmail}</b><small>Learning progress and checklist state are currently local demo data.</small></span><button className="secondary" onClick={() => { localStorage.removeItem('guardpass-session'); setSessionEmail(''); setStatus('Signed out.'); }}>Sign out</button></div> : <><label htmlFor="login-email">Email address</label><div className="emailLogin"><input id="login-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /><button className="primary" onClick={login}><LogIn size={16} /> Send sign-in link</button></div><p className="subtle">Demo mode signs in locally. No password is requested or saved.</p></>}{status && <div className="toolResult good">{status}</div>}<div className="accountFeatures"><span><ShieldCheck size={16} /> Supabase Auth for production sign-in and password reset</span><span><ClipboardCheck size={16} /> Row-level security for user progress and quiz attempts</span><span><BookOpen size={16} /> Courses remain readable without storing analyzed passwords</span></div><div className="privacy"><ShieldCheck size={18} /><span><b>Privacy promise.</b> GuardPass never stores or transmits passwords entered into the analyzer.</span></div></section><section className="panel adminEntry"><div className="sectionTitle"><LockKeyhole size={18} /> Administrator access</div><p>Administrators can review user emails and login events in a protected console. The local preview uses a clearly labeled demo gate; production access must use Supabase roles and RLS.</p><button className="secondary" onClick={onAdmin}>Open admin login <ExternalLink size={16} /></button></section></main>;
+
+  const authenticate = async () => {
+    const normalized = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) { setStatus('Enter a valid email address.'); return; }
+    if (!password || password.length < 10 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password)) { setStatus('Use at least 10 characters with uppercase, lowercase and a number.'); return; }
+    if (mode === 'signup' && password !== confirmPassword) { setStatus('The passwords do not match.'); return; }
+    setBusy(true); setStatus('');
+    try {
+      if (supabase) {
+        const result = mode === 'signup' ? await supabase.auth.signUp({ email: normalized, password }) : await supabase.auth.signInWithPassword({ email: normalized, password });
+        if (result.error) throw result.error;
+        if (mode === 'signup' && !result.data.session) { setStatus('Check your email to confirm the account, then sign in.'); return; }
+        if (result.data.user?.id) await recordRemoteLogin(result.data.user.id, result.data.user.email || normalized);
+        setSessionEmail(result.data.user?.email || normalized); setStatus(mode === 'signup' ? 'Account created and signed in.' : 'Signed in securely with Supabase Auth.');
+      } else {
+        if (mode === 'signup') {
+          if (readLocalCredentials().some((credential) => credential.email === normalized)) { setStatus('An account already exists for this email. Sign in instead.'); return; }
+          await saveLocalCredential(normalized, password); localLogin(normalized); setStatus('Account created for this browser. Configure Supabase to sync across devices.');
+        } else {
+          if (!(await verifyLocalCredential(normalized, password))) { setStatus('The email or password is incorrect.'); return; }
+          localLogin(normalized); setStatus('Signed in securely for this local preview.');
+        }
+      }
+      setPassword(''); setConfirmPassword('');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Unable to sign in. Check your details and try again.');
+    } finally { setBusy(false); }
+  };
+
+  const signOut = async () => { if (supabase) await supabase.auth.signOut(); localStorage.removeItem('guardpass-session'); setSessionEmail(''); setStatus('Signed out.'); };
+  const resetPassword = async () => {
+    const normalized = email.trim().toLowerCase();
+    if (!supabase) { setStatus('Password reset is available after Supabase is configured.'); return; }
+    if (!normalized) { setStatus('Enter your email address first.'); return; }
+    const { error } = await supabase.auth.resetPasswordForEmail(normalized, { redirectTo: window.location.origin + window.location.pathname });
+    setStatus(error ? error.message : 'If that account exists, a password-reset email has been sent.');
+  };
+
+  const passwordChecks = [{ label: '10+ characters', valid: password.length >= 10 }, { label: 'Uppercase letter', valid: /[A-Z]/.test(password) }, { label: 'Lowercase letter', valid: /[a-z]/.test(password) }, { label: 'Number', valid: /\d/.test(password) }];
+  return <main><div className="hero"><div className="eyebrow"><UserRound size={16} /> ACCOUNT & SYNC</div><h1>Your learning data, under your control.</h1><p>{hasSupabase ? 'Create an account or sign in with Supabase Auth. Your password is handled by Supabase and is never stored in GuardPass tables.' : 'Create a browser account for this preview, or configure Supabase for secure accounts and progress that sync across devices.'}</p></div><section className="panel accountPanel"><div className="sectionTitle"><LogIn size={18} /> Email and password login</div>{sessionEmail ? <div className="signedIn"><CheckCircle2 size={19} /><span>Signed in as <b>{sessionEmail}</b><small>{hasSupabase ? 'Account and learning records sync through Supabase.' : 'Learning progress is currently local demo data.'}</small></span><button className="secondary" onClick={signOut}>Sign out</button></div> : <><label htmlFor="login-email">Email address</label><input id="login-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /><label htmlFor="login-password">Password</label><div className="inputWrap"><input id="login-password" type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 10 characters" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} /><button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff /> : <Eye />}</button></div>{mode === 'signup' && <><div className="passwordRequirements" aria-label="Password requirements">{passwordChecks.map((check) => <span className={check.valid ? 'met' : ''} key={check.label}>{check.valid ? <CheckCircle2 size={14} /> : <span className="requirementDot" />} {check.label}</span>)}</div><label htmlFor="confirm-password">Confirm password</label><div className="inputWrap"><input id="confirm-password" type={showConfirmPassword ? 'text' : 'password'} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Re-enter your password" autoComplete="new-password" /><button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} aria-label={showConfirmPassword ? 'Hide confirmation password' : 'Show confirmation password'}>{showConfirmPassword ? <EyeOff /> : <Eye />}</button></div></>}<div className="emailLogin"><button className="primary" onClick={() => void authenticate()} disabled={busy}>{busy ? 'Working…' : mode === 'signup' ? 'Create account' : 'Sign in'} <LogIn size={16} /></button>{mode === 'signin' && <button className="textButton" type="button" onClick={() => void resetPassword()}>Forgot password?</button>}</div><p className="subtle">{hasSupabase ? 'Supabase Auth handles password hashing, email confirmation and reset. Passwords are never written to the application database.' : 'Preview fallback: only a salted PBKDF2 password hash is stored in this browser. Your password is never saved as plain text. Add Supabase variables for real account storage.'}</p><button className="textButton" type="button" onClick={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setStatus(''); }}>{mode === 'signin' ? 'Need an account? Create one' : 'Already have an account? Sign in'}</button></>}{status && <div className="toolResult good">{status}</div>}<div className="accountFeatures"><span><ShieldCheck size={16} /> Authenticated email accounts and secure password reset</span><span><ClipboardCheck size={16} /> Row-level security for progress, bookmarks and quiz attempts</span><span><BookOpen size={16} /> Login events recorded without storing analyzed passwords</span></div><div className="privacy"><ShieldCheck size={18} /><span><b>Privacy promise.</b> GuardPass never stores or transmits passwords entered into the analyzer.</span></div></section><section className="panel adminEntry"><div className="sectionTitle"><LockKeyhole size={18} /> Administrator access</div><p>Administrators can review synchronized emails and login events only through Supabase roles and Row Level Security.</p><button className="secondary" onClick={onAdmin}>Open admin login <ExternalLink size={16} /></button></section></main>;
 }
 
 function AdminPanel() {
   const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [showPassword, setShowPassword] = useState(false); const [access, setAccess] = useState(false); const [error, setError] = useState('');
-  const users = readDemoUsers(); let events: { email: string; at: string; success: boolean }[] = []; try { events = JSON.parse(localStorage.getItem('guardpass-login-events') || '[]'); } catch { events = []; }
-  const login = () => { if (!ADMIN_PASSWORD) { setError('Admin access is not configured. Set VITE_ADMIN_PASSWORD in your local environment.'); return; } if (email.trim().toLowerCase() !== ADMIN_EMAIL || password !== ADMIN_PASSWORD) { setError('The admin email or password is incorrect.'); return; } setError(''); setAccess(true); };
-  if (!access) return <main><div className="hero"><div className="eyebrow"><LockKeyhole size={16} /> ADMIN CONSOLE</div><h1>Manage learning insights responsibly.</h1><p>This protected preview requires the authorized admin email and password before showing user email records.</p></div><section className="panel adminLogin"><div className="sectionTitle"><LogIn size={18} /> Admin login</div><label htmlFor="admin-email">Admin email</label><input id="admin-email" className="standaloneInput" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder={ADMIN_EMAIL} autoComplete="username" /><label htmlFor="admin-password">Admin password</label><div className="inputWrap adminPasswordField"><input id="admin-password" type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter admin password" autoComplete="current-password" /><button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? 'Hide admin password' : 'Show admin password'}>{showPassword ? <EyeOff /> : <Eye />}</button></div><p className="subtle">Authorized email: <b>{ADMIN_EMAIL}</b>. The password is read from <code>VITE_ADMIN_PASSWORD</code> and is never displayed or stored.</p><button className="primary" onClick={login}>Open admin records <LayoutDashboard size={16} /></button>{error && <div className="toolResult warning">{error}</div>}</section></main>;
-  return <main><div className="hero"><div className="eyebrow"><LayoutDashboard size={16} /> ADMIN CONSOLE</div><h1>Users and login activity</h1><p>These records are local demo data. Supabase should enforce administrator access and audit storage in production.</p></div><div className="dashboardStats"><section className="panel statCard"><span className="statIcon"><UserRound size={20} /></span><b>{users.length}</b><span>Known users</span></section><section className="panel statCard"><span className="statIcon"><LogIn size={20} /></span><b>{events.length}</b><span>Login events</span></section><section className="panel statCard"><span className="statIcon"><ShieldCheck size={20} /></span><b>RLS</b><span>Production access model</span></section></div><section className="panel adminTable"><div className="sectionTitle"><UserRound size={18} /> Registered emails</div>{users.length ? <div className="tableWrap"><table><thead><tr><th>Email</th><th>First login</th><th>Last login</th><th>Logins</th></tr></thead><tbody>{users.map((user) => <tr key={user.email}><td>{user.email}</td><td>{new Date(user.firstLogin).toLocaleString()}</td><td>{new Date(user.lastLogin).toLocaleString()}</td><td>{user.logins}</td></tr>)}</tbody></table></div> : <div className="emptyState">No local users have signed in yet.</div>}</section><section className="panel adminTable"><div className="sectionTitle"><ClipboardCheck size={18} /> Recent login events</div>{events.length ? <div className="tableWrap"><table><thead><tr><th>Email</th><th>Time</th><th>Status</th></tr></thead><tbody>{events.slice(0, 20).map((event, index) => <tr key={`${event.email}-${event.at}-${index}`}><td>{event.email}</td><td>{new Date(event.at).toLocaleString()}</td><td><span className="statusPill">{event.success ? 'Successful' : 'Failed'}</span></td></tr>)}</tbody></table></div> : <div className="emptyState">No login events have been recorded yet.</div>}</section></main>;
+  const [remoteEvents, setRemoteEvents] = useState<AdminEvent[]>([]);
+  const localUsers = readDemoUsers(); let localEvents: AdminEvent[] = []; try { localEvents = JSON.parse(localStorage.getItem('guardpass-login-events') || '[]'); } catch { localEvents = []; }
+  const events = hasSupabase ? remoteEvents : localEvents; const users = hasSupabase ? summarizeUsers(remoteEvents) : localUsers;
+  const login = async () => {
+    const normalized = email.trim().toLowerCase();
+    if (normalized !== ADMIN_EMAIL) { setError('The admin email or password is incorrect.'); return; }
+    if (hasSupabase) {
+      if (!supabase) return;
+      const { error: authError } = await supabase.auth.signInWithPassword({ email: normalized, password });
+      if (authError) { setError('The admin email or password is incorrect.'); return; }
+      const { data, error: recordsError } = await supabase.from('login_events').select('email, created_at, success').order('created_at', { ascending: false }).limit(100);
+      if (recordsError) { await supabase.auth.signOut(); setError('This account is not authorized for the admin records.'); return; }
+      setRemoteEvents((data || []).map((event) => ({ email: event.email, at: event.created_at, success: event.success })));
+      setError(''); setAccess(true); return;
+    }
+    if (!ADMIN_PASSWORD || password !== ADMIN_PASSWORD) { setError('The admin email or password is incorrect.'); return; }
+    setError(''); setAccess(true);
+  };
+  if (!access) return <main><div className="hero"><div className="eyebrow"><LockKeyhole size={16} /> ADMIN CONSOLE</div><h1>Manage learning insights responsibly.</h1><p>{hasSupabase ? 'Sign in with the authorized Supabase admin account. Row Level Security controls access to synchronized email records.' : 'This local preview gate requires the authorized admin email and password before showing local records.'}</p></div><section className="panel adminLogin"><div className="sectionTitle"><LogIn size={18} /> Admin login</div><label htmlFor="admin-email">Admin email</label><input id="admin-email" className="standaloneInput" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder={ADMIN_EMAIL} autoComplete="username" /><label htmlFor="admin-password">Admin password</label><div className="inputWrap adminPasswordField"><input id="admin-password" type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter admin password" autoComplete="current-password" /><button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? 'Hide admin password' : 'Show admin password'}>{showPassword ? <EyeOff /> : <Eye />}</button></div><p className="subtle">Authorized email: <b>{ADMIN_EMAIL}</b>. {hasSupabase ? 'Supabase Auth verifies the password; it is never stored in GuardPass tables.' : <>The local password is read from <code>VITE_ADMIN_PASSWORD</code> and is never displayed or stored.</>}</p><button className="primary" onClick={() => void login()}>Open admin records <LayoutDashboard size={16} /></button>{error && <div className="toolResult warning">{error}</div>}</section></main>;
+  return <main><div className="hero"><div className="eyebrow"><LayoutDashboard size={16} /> ADMIN CONSOLE</div><h1>Users and login activity</h1><p>{hasSupabase ? 'These records are read from Supabase with administrator-only Row Level Security.' : 'These records are local demo data. Configure Supabase for shared production records.'}</p></div><div className="dashboardStats"><section className="panel statCard"><span className="statIcon"><UserRound size={20} /></span><b>{users.length}</b><span>Known users</span></section><section className="panel statCard"><span className="statIcon"><LogIn size={20} /></span><b>{events.length}</b><span>Login events</span></section><section className="panel statCard"><span className="statIcon"><ShieldCheck size={20} /></span><b>RLS</b><span>Production access model</span></section></div><section className="panel adminTable"><div className="sectionTitle"><UserRound size={18} /> Registered emails</div>{users.length ? <div className="tableWrap"><table><thead><tr><th>Email</th><th>First login</th><th>Last login</th><th>Logins</th></tr></thead><tbody>{users.map((user) => <tr key={user.email}><td>{user.email}</td><td>{new Date(user.firstLogin).toLocaleString()}</td><td>{new Date(user.lastLogin).toLocaleString()}</td><td>{user.logins}</td></tr>)}</tbody></table></div> : <div className="emptyState">No users have signed in yet.</div>}</section><section className="panel adminTable"><div className="sectionTitle"><ClipboardCheck size={18} /> Recent login events</div>{events.length ? <div className="tableWrap"><table><thead><tr><th>Email</th><th>Time</th><th>Status</th></tr></thead><tbody>{events.slice(0, 20).map((event, index) => <tr key={`${event.email}-${event.at}-${index}`}><td>{event.email}</td><td>{new Date(event.at).toLocaleString()}</td><td><span className="statusPill">{event.success ? 'Successful' : 'Failed'}</span></td></tr>)}</tbody></table></div> : <div className="emptyState">No login events have been recorded yet.</div>}</section></main>;
 }
 
 
 function App() {
   const [password, setPassword] = useState(''), [show, setShow] = useState(false), [tab, setTab] = useState('analyzer'), [length, setLength] = useState(20), [generated, setGenerated] = useState(''), [toast, setToast] = useState(''), [policy, setPolicy] = useState<Policy>(defaultPolicy), [progress, setProgress] = useState<Record<string, boolean>>(() => readProgress()), [mobileNav, setMobileNav] = useState(false);
+  const [authUserId, setAuthUserId] = useState<string | null>(null);
   const analysis = useMemo(() => analyze(password), [password]);
+  useEffect(() => {
+    if (!supabase) return;
+    let mounted = true;
+    const sync = async (userId: string | null) => { if (!userId) return; const remote = await loadRemoteProgress(userId); if (mounted && Object.keys(remote).length) { setProgress((current) => ({ ...current, ...remote })); writeProgress({ ...readProgress(), ...remote }); } };
+    void supabase.auth.getSession().then(({ data }) => { if (!mounted) return; const userId = data.session?.user.id || null; setAuthUserId(userId); void sync(userId); });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => { const userId = session?.user.id || null; if (mounted) setAuthUserId(userId); window.setTimeout(() => void sync(userId), 0); });
+    return () => { mounted = false; listener.subscription.unsubscribe(); };
+  }, []);
   const copy = async (value: string) => { await navigator.clipboard.writeText(value); setToast('Copied'); window.setTimeout(() => setToast(''), 1200); };
   const navigate = (next: string) => { setTab(next); setMobileNav(false); window.scrollTo({ top: 0, behavior: 'smooth' }); };
   const navItems = [['analyzer', 'Analyzer', <LockKeyhole size={15} />], ['learn', 'Learn', <BookOpen size={15} />], ['dashboard', 'Dashboard', <LayoutDashboard size={15} />], ['security', 'Security Center', <ShieldCheck size={15} />], ['generator', 'Generator', <RefreshCw size={15} />], ['about', 'About', <Info size={15} />]] as const;
   return <div className="app"><ParticleField /><header><div className="brand"><span className="logo"><ShieldCheck /></span><span>GUARDPASS</span></div><button className="mobileMenu" aria-label="Toggle navigation" onClick={() => setMobileNav(!mobileNav)}><Menu /></button><nav className={mobileNav ? 'open' : ''}>{navItems.map(([id, label, icon]) => <button className={tab === id ? 'active' : ''} onClick={() => navigate(id)} key={id}>{icon}{label}</button>)}<button className={`accountButton ${tab === 'account' ? 'active' : ''}`} onClick={() => navigate('account')}><UserRound size={15} /> Account</button></nav></header>
-    {tab === 'analyzer' && <main><div className="hero"><div className="eyebrow"><LockKeyhole size={16} /> LOCAL-FIRST SECURITY ANALYSIS</div><h1>Understand your password's resistance to guessing.</h1><p>Analyze length, diversity, common-password patterns, sequences, repetition and more — entirely in your browser.</p></div><section className="panel"><label>Password to analyze</label><div className="inputWrap"><input type={show ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Type a password…" autoComplete="off" /><button onClick={() => setShow(!show)} aria-label={show ? 'Hide password' : 'Show password'}>{show ? <EyeOff /> : <Eye />}</button></div><div className="privacy"><ShieldCheck size={18} /><span><b>Privacy first.</b> Your password stays in this browser and is not stored or sent to a server.</span></div></section>{password && <><div className="grid"><section className="panel"><div className="score"><div className="circle">{analysis.score}<small>/100</small></div><div><span>Security score</span><h2>{analysis.label}</h2><div className="bar"><i style={{ width: `${analysis.score}%` }} /></div></div></div><div className="stats"><div><span>Guessing resistance</span><b>{analysis.resistance}</b></div><div><span>Practical estimate</span><b>{analysis.entropy} bits</b></div><div><span>Theoretical entropy</span><b>{analysis.theoretical} bits</b></div></div></section><section className="panel"><div className="sectionTitle"><AlertTriangle size={18} /> Security findings</div>{analysis.findings.map((finding, index) => <div className="finding" key={`${finding}-${index}`}><AlertTriangle size={16} /><span>{finding}</span></div>)}</section></div><div className="featureGrid"><AttackPatternVisualization analysis={analysis} /><PasswordPolicyTester password={password} analysis={analysis} policy={policy} setPolicy={setPolicy} /></div><ScoreExplanation analysis={analysis} /><ImprovementSuggestions analysis={analysis} /></>}</main>}
+    {tab === 'analyzer' && <main><div className="hero"><div className="eyebrow"><LockKeyhole size={16} /> LOCAL-FIRST SECURITY ANALYSIS</div><h1>Understand your password's resistance to guessing.</h1><p>Analyze length, diversity, common-password patterns, sequences, repetition and more — entirely in your browser.</p></div><section className="panel"><label>Password to analyze</label><div className="inputWrap"><input type={show ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Type a password…" autoComplete="off" /><button onClick={() => setShow(!show)} aria-label={show ? 'Hide password' : 'Show password'}>{show ? <EyeOff /> : <Eye />}</button></div><div className="privacy"><ShieldCheck size={18} /><span><b>Privacy first.</b> Your password stays in this browser and is not stored or sent to a server.</span></div></section><section className="panel signupCallout"><div className="sectionTitle"><UserRound size={18} /> Keep learning with GuardPass</div><h2>Protect more than one password.</h2><p>Sign up to remember your learning progress and continue practical lessons about safer accounts, devices and personal data.</p><button className="primary" onClick={() => navigate('account')}>Create a secure account <LogIn size={16} /></button><button className="textButton" type="button" onClick={() => navigate('account')}>Already registered? Sign in</button></section>{password && <><div className="grid"><section className="panel"><div className="score"><div className="circle">{analysis.score}<small>/100</small></div><div><span>Security score</span><h2>{analysis.label}</h2><div className="bar"><i style={{ width: `${analysis.score}%` }} /></div></div></div><div className="stats"><div><span>Guessing resistance</span><b>{analysis.resistance}</b></div><div><span>Practical estimate</span><b>{analysis.entropy} bits</b></div><div><span>Theoretical entropy</span><b>{analysis.theoretical} bits</b></div></div></section><section className="panel"><div className="sectionTitle"><AlertTriangle size={18} /> Security findings</div>{analysis.findings.map((finding, index) => <div className="finding" key={`${finding}-${index}`}><AlertTriangle size={16} /><span>{finding}</span></div>)}</section></div><div className="featureGrid"><AttackPatternVisualization analysis={analysis} /><PasswordPolicyTester password={password} analysis={analysis} policy={policy} setPolicy={setPolicy} /></div><ScoreExplanation analysis={analysis} /><ImprovementSuggestions analysis={analysis} /></>}</main>}
     {tab === 'generator' && <main><div className="hero"><div className="eyebrow"><Shield size={16} /> SECURE GENERATOR</div><h1>Create a stronger, unique password.</h1><p>Passwords are generated locally with the browser's cryptographically secure random number generator.</p></div><section className="panel generator"><label>Length: <b>{length}</b></label><input type="range" min="12" max="64" value={length} onChange={(event) => setLength(+event.target.value)} /><div className="generated">{generated || 'Click generate to create a password'}{generated && <button onClick={() => copy(generated)} aria-label="Copy generated password"><Copy /></button>}</div><button className="primary" onClick={() => setGenerated(generate(length))}><RefreshCw size={17} /> Generate password</button></section></main>}
-    {tab === 'learn' && <LearningHub progress={progress} setProgress={setProgress} />}
+    {tab === 'learn' && <LearningHub progress={progress} setProgress={setProgress} userId={authUserId} />}
     {tab === 'dashboard' && <Dashboard progress={progress} onLearn={() => navigate('learn')} onSecurity={() => navigate('security')} />}
     {tab === 'security' && <SecurityCenter />}
     {tab === 'account' && <AccountPanel onAdmin={() => navigate('admin')} />}
